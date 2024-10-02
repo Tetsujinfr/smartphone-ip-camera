@@ -4,7 +4,6 @@
   <meta charset="utf-8">
   <title>Smartphone IP Camera</title>
   <style>
-    /* Same styles as before */
     body {
       font-family: Arial, sans-serif;
       text-align: center;
@@ -15,7 +14,7 @@
       height: auto;
       margin-top: 20px;
     }
-    #peer-id {
+    #camera-id, #viewer-id {
       word-break: break-all;
       font-weight: bold;
     }
@@ -37,19 +36,25 @@
   <h1>Smartphone IP Camera</h1>
 
   <div class="section">
-    <!-- Camera selection -->
+    <!-- Camera Section -->
+    <h2>Camera</h2>
     <label for="camera-select">Select Camera:</label>
     <select id="camera-select"></select>
     <br>
     <button id="start-camera">Start Camera</button>
-    <p>Your Camera ID: <span id="peer-id">Not connected</span></p>
+    <p>Your Camera ID: <span id="camera-id">Not connected</span></p>
     <video id="local-video" autoplay muted></video>
+    <br>
+    <label for="viewer-id-input">Enter Viewer ID:</label>
+    <input type="text" id="viewer-id-input" placeholder="Viewer ID">
+    <button id="call-viewer">Call Viewer</button>
   </div>
 
   <div class="section">
-    <h2>Viewer Connection</h2>
-    <input type="text" id="remote-peer-id" placeholder="Enter Camera ID to view">
-    <button id="connect">Connect</button>
+    <!-- Viewer Section -->
+    <h2>Viewer</h2>
+    <button id="initialize-viewer">Initialize Viewer</button>
+    <p>Your Viewer ID: <span id="viewer-id">Not connected</span></p>
     <video id="remote-video" autoplay controls></video>
   </div>
 
@@ -61,10 +66,11 @@
   </div>
 
   <!-- Include PeerJS library -->
-  <script src="https://unpkg.com/peerjs@1.3.2/dist/peerjs.min.js"></script>
+  <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
   <script>
     let localStream;
-    let peer;
+    let cameraPeer;
+    let viewerPeer;
     let selectedCameraId;
 
     // Enumerate cameras and populate the camera select dropdown
@@ -92,84 +98,6 @@
 
     // Call enumerateCameras on page load
     enumerateCameras();
-
-    document.getElementById('start-camera').onclick = async () => {
-      try {
-        // Request access to the selected camera and microphone
-        localStream = await navigator.mediaDevices.getUserMedia({ 
-          video: { deviceId: selectedCameraId ? { exact: selectedCameraId } : undefined }, 
-          audio: true 
-        });
-        document.getElementById('local-video').srcObject = localStream;
-
-        // Initialize PeerJS
-        peer = new Peer();
-
-        peer.on('open', (id) => {
-          document.getElementById('peer-id').textContent = id;
-          alert('Share this Camera ID with the viewer: ' + id);
-        });
-
-        // Answer incoming calls and stream video and audio
-        peer.on('call', (call) => {
-          call.answer(localStream);
-
-          call.on('error', (err) => {
-            console.error(err);
-            alert('An error occurred during the call: ' + err);
-          });
-        });
-
-        peer.on('error', (err) => {
-          console.error(err);
-          alert('An error occurred: ' + err);
-        });
-      } catch (err) {
-        console.error(err);
-        alert('Could not access camera or microphone: ' + err);
-      }
-    };
-
-    document.getElementById('connect').onclick = () => {
-      const remotePeerId = document.getElementById('remote-peer-id').value.trim();
-      if (!remotePeerId) {
-        alert('Please enter a valid Camera ID.');
-        return;
-      }
-
-      // Initialize PeerJS if not already initialized
-      if (!peer) {
-        peer = new Peer();
-
-        peer.on('error', (err) => {
-          console.error(err);
-          alert('An error occurred: ' + err);
-        });
-      }
-
-      // Wait for peer to open before making a call
-      if (peer.open) {
-        makeCall(remotePeerId);
-      } else {
-        peer.on('open', () => {
-          makeCall(remotePeerId);
-        });
-      }
-
-      function makeCall(remotePeerId) {
-        // Call the remote peer without sending a stream
-        const call = peer.call(remotePeerId, null);
-
-        call.on('stream', (remoteStream) => {
-          document.getElementById('remote-video').srcObject = remoteStream;
-        });
-
-        call.on('error', (err) => {
-          console.error(err);
-          alert('An error occurred during the call: ' + err);
-        });
-      }
-    };
 
     // Sensor Data Handling
     function handleMotion(event) {
@@ -200,7 +128,7 @@
       document.getElementById('orient-gamma').textContent = gamma.toFixed(2);
     }
 
-    // Request permission for sensor access (required on iOS 13+ and some Android devices)
+    // Request permission for sensor access
     function requestSensorAccess() {
       if (typeof DeviceMotionEvent.requestPermission === 'function') {
         DeviceMotionEvent.requestPermission()
@@ -222,6 +150,92 @@
 
     // Request sensor access on page load
     requestSensorAccess();
+
+    // Camera Functionality
+    document.getElementById('start-camera').onclick = async () => {
+      try {
+        // Request access to the selected camera and microphone
+        localStream = await navigator.mediaDevices.getUserMedia({ 
+          video: { deviceId: selectedCameraId ? { exact: selectedCameraId } : undefined }, 
+          audio: true 
+        });
+        document.getElementById('local-video').srcObject = localStream;
+
+        // Initialize Camera Peer
+        cameraPeer = new Peer();
+
+        cameraPeer.on('open', (id) => {
+          document.getElementById('camera-id').textContent = id;
+          alert('Your Camera ID is: ' + id);
+        });
+
+        cameraPeer.on('error', (err) => {
+          console.error(err);
+          alert('An error occurred: ' + err);
+        });
+      } catch (err) {
+        console.error(err);
+        alert('Could not access camera or microphone: ' + err);
+      }
+    };
+
+    document.getElementById('call-viewer').onclick = () => {
+      const viewerId = document.getElementById('viewer-id-input').value.trim();
+      if (!viewerId) {
+        alert('Please enter a valid Viewer ID.');
+        return;
+      }
+
+      if (!cameraPeer || !cameraPeer.open) {
+        alert('Camera peer is not initialized. Please start the camera first.');
+        return;
+      }
+
+      // Initiate the call to the viewer
+      const call = cameraPeer.call(viewerId, localStream);
+
+      call.on('error', (err) => {
+        console.error(err);
+        alert('An error occurred during the call: ' + err);
+      });
+
+      call.on('close', () => {
+        console.log('The call has ended.');
+      });
+    };
+
+    // Viewer Functionality
+    document.getElementById('initialize-viewer').onclick = () => {
+      viewerPeer = new Peer();
+
+      viewerPeer.on('open', (id) => {
+        document.getElementById('viewer-id').textContent = id;
+        alert('Your Viewer ID is: ' + id);
+      });
+
+      viewerPeer.on('call', (call) => {
+        // Answer the call without sending a stream
+        call.answer(null);
+
+        call.on('stream', (remoteStream) => {
+          document.getElementById('remote-video').srcObject = remoteStream;
+        });
+
+        call.on('error', (err) => {
+          console.error(err);
+          alert('An error occurred during the call: ' + err);
+        });
+
+        call.on('close', () => {
+          console.log('The call has ended.');
+        });
+      });
+
+      viewerPeer.on('error', (err) => {
+        console.error(err);
+        alert('An error occurred: ' + err);
+      });
+    };
   </script>
 </body>
 </html>
